@@ -6,7 +6,7 @@ from typing import Any, Optional, Dict, Callable, Tuple
 import logging
 import uuid
 
-from pricing.extractors import CostBreakdown, get_extractor
+from pricing.extractors import ResponseBreakdown, get_extractor
 from pricing.aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)
@@ -97,111 +97,6 @@ class CostInterceptor:
             f"({provider}/{model}): {usage}"
         )
 
-
-class AnthropicInterceptor(CostInterceptor):
-    """Interceptor specifically for Anthropic client library."""
-
-    def __call__(self, response: Any) -> Any:
-        """
-        Decorator/callable for wrapping Anthropic responses.
-        
-        Usage:
-            interceptor = AnthropicInterceptor()
-            
-            # Wrap existing client
-            client = Anthropic()
-            original_message = client.messages.create
-            
-            def wrapped_create(*args, **kwargs):
-                resp = original_message(*args, **kwargs)
-                interceptor.process_response(resp.model_dump(), 'anthropic')
-                return resp
-            
-            client.messages.create = wrapped_create
-        """
-        return self
-
-    def wrap_client(self, client: Any) -> Any:
-        """
-        Wrap Anthropic client to intercept API calls.
-        
-        Args:
-            client: anthropic.Anthropic() instance
-        
-        Returns:
-            Wrapped client (modified in place)
-        """
-        original_create = client.messages.create
-
-        def wrapped_create(*args, **kwargs):
-            response = original_create(*args, **kwargs)
-            
-            # Extract response data
-            if hasattr(response, 'model_dump'):
-                response_dict = response.model_dump()
-            else:
-                response_dict = response.__dict__
-            
-            # Process for cost
-            self.process_response(
-                response_dict,
-                provider='anthropic',
-                metadata={'method': 'messages.create'},
-            )
-            
-            return response
-
-        client.messages.create = wrapped_create
-        return client
-
-
-class OpenAIInterceptor(CostInterceptor):
-    """Interceptor specifically for OpenAI client library."""
-
-    def wrap_client(self, client: Any) -> Any:
-        """
-        Wrap OpenAI client to intercept API calls.
-        
-        Args:
-            client: openai.OpenAI() instance
-        
-        Returns:
-            Wrapped client (modified in place)
-        """
-        original_create = client.chat.completions.create
-
-        def wrapped_create(*args, **kwargs):
-            response = original_create(*args, **kwargs)
-            
-            # Extract response data
-            if hasattr(response, 'model_dump'):
-                response_dict = response.model_dump()
-            else:
-                response_dict = response.__dict__
-            
-            # Process for cost
-            self.process_response(
-                response_dict,
-                provider='openai',
-                metadata={'method': 'chat.completions.create'},
-            )
-            
-            return response
-
-        client.chat.completions.create = wrapped_create
-        return client
-
-
-def wrap_anthropic_client(client: Any) -> Any:
-    """Convenience function to wrap Anthropic client."""
-    interceptor = AnthropicInterceptor()
-    return interceptor.wrap_client(client)
-
-
-def wrap_openai_client(client: Any) -> Any:
-    """Convenience function to wrap OpenAI client."""
-    interceptor = OpenAIInterceptor()
-    return interceptor.wrap_client(client)
 
 
 def wrap_custom_client(

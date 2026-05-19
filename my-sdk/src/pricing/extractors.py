@@ -114,7 +114,7 @@ class Extractor(UsageExtractor):
         """
         try:
             if "usage" not in response:
-                logger.warning(f"No usage field in "{model}" response")
+                logger.warning(f'No usage field in "[model]" response')
                 return None
 
             usage_obj = response["usage"]
@@ -147,7 +147,7 @@ EXTRACTORS: Dict[str, type] = {
 }
 
 
-def get_extractor(provider: str) -> Optional[CostExtractor]:
+def get_extractor(provider: str) -> Optional[UsageExtractor]:
     """Return an extractor instance for the given provider."""
     extractor_cls = EXTRACTORS.get(provider.lower()) if provider else None
     if not extractor_cls:

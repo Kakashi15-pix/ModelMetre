@@ -45,6 +45,11 @@ Primary files:
 - [my-sdk/src/pricing/extractors.py](my-sdk/src/pricing/extractors.py)
 - [my-sdk/src/pricing/aggregator.py](my-sdk/src/pricing/aggregator.py)
 
+Note: Pricing lookup and upstream sync are handled by the backend `PricingManager`
+located at [server-side_sdk/manager.py](../server-side_sdk/manager.py). The SDK's
+pricing modules focus on extraction, buffering and the interceptor flow; the
+backend performs authoritative pricing resolution and caching by default.
+
 ### Server-side auth flow (server-side_sdk)
 1. Request carries Bearer API key.
 2. verify_api_key derives HMAC hash and loads key record.
@@ -93,7 +98,7 @@ Relevant files:
 Start here:
 - [my-sdk/src/pricing/extractors.py](my-sdk/src/pricing/extractors.py)
 - [my-sdk/src/pricing/interceptor.py](my-sdk/src/pricing/interceptor.py)
-- [server-side_sdk/manager.py](../server-side_sdk/manager.py)
+- Backend pricing manager: [server-side_sdk/manager.py](../server-side_sdk/manager.py)
 - [my-sdk/tests/integration/test_cost_tracking.py](my-sdk/tests/integration/test_cost_tracking.py)
 
 ### Modify API key policy

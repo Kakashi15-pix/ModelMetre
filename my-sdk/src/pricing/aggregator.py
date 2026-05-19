@@ -24,8 +24,8 @@ class RequestDetails:
     provider: str
     input_tokens: int
     output_tokens: int
-    cache_read_tokens: int = 0
-    cache_creation_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
     stop_reason: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -38,8 +38,8 @@ class RequestDetails:
             "provider": self.provider,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "cache_read_tokens": self.cache_read_tokens,
-            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
             "stop_reason": self.stop_reason,
             "metadata": self.metadata,
         }
@@ -93,8 +93,8 @@ class RequestDetailsBuffer:
         provider: str,
         input_tokens: int,
         output_tokens: int,
-        cache_read_tokens: int = 0,
-        cache_creation_tokens: int = 0,
+        cache_read_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
         stop_reason: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -119,8 +119,8 @@ class RequestDetailsBuffer:
             provider=provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cache_read_tokens=cache_read_tokens,
-            cache_creation_tokens=cache_creation_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
             stop_reason=stop_reason,
             metadata=metadata or {},
         )

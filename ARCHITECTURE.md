@@ -32,10 +32,10 @@
     └───────────────────────────────────────────────────────────────┘
         ↓
     ┌───────────────────────────────────────────────────────────────┐
-    │              PricingManager                                    │
-    │  • Local cache (pricing.json)                                 │
-    │  • Daily sync from LiteLLM (hash-based)                      │
-    │  • Silent fallback on network error                           │
+    │         Server-side PricingManager (server-side_sdk)          │
+    │  • Located in server-side_sdk/manager.py                      │
+    │  • Local cache + upstream sync managed on backend             │
+    │  • Silent fallback on network error; server exposes pricing API
     └───────────────────────────────────────────────────────────────┘
         ↓
     ┌───────────────────────────────────────────────────────────────┐
@@ -68,14 +68,18 @@ src/
 ├── __init__.py                 # Main SDK exports
 ├── sdk.py                      # CostAnalyticsSDK unified client
 │
-└── pricing/                    # Cost analytics engine
-    ├── __init__.py            # Pricing module exports
-    ├── manager.py             # PricingManager (sync + fallback)
-    ├── extractors.py          # Provider-specific extractors
-    ├── aggregator.py          # Cost aggregation + metrics
-    ├── interceptor.py         # Client library wrappers
-    ├── pricing.json           # Bundled fallback pricing
-    └── pricing_sync.json      # Sync state tracking
+└── pricing/                    # Cost analytics engine (SDK-side)
+  ├── __init__.py            # Pricing module exports
+  ├── extractors.py          # Provider-specific extractors
+  ├── aggregator.py          # Cost aggregation + metrics
+  ├── interceptor.py         # Client library wrappers
+
+Note: The authoritative PricingManager that performs upstream sync,
+cache management and pricing lookups lives in the backend at
+`server-side_sdk/manager.py`. The SDK is responsible for extraction,
+interception and buffering of request details; final pricing resolution
+is performed on the server unless the SDK is explicitly configured
+to perform local lookups.
 
 examples/
 ├── cost_tracking.py            # Basic usage examples
@@ -151,30 +155,17 @@ tests/
 ```
 Scheduled (daily):
 
-1. PricingManager._should_sync() → True (24h elapsed)
+1. The backend `PricingManager` (server-side_sdk/manager.py) manages upstream sync
+  and local caching. Typical flow:
 
-2. requests.get("https://raw.githubusercontent.com/.../model_prices...")
-   → 200 OK, JSON response
+  • Check sync interval and decide whether to contact upstream
+  • GET upstream JSON from LiteLLM
+  • Compute hash of upstream data and compare with last known hash
+  • If changed: update pricing cache and sync state files on server
+  • On error: increment sync failures and continue serving cached data
 
-3. Compute hash of upstream data:
-   hash_new = sha256(json.dumps(upstream_data))
-
-4. Compare with last hash:
-   if hash_new != sync_state["last_hash"]:
-     • Update pricing_data
-     • Update sync_state
-     • Save to pricing_sync.json
-     • Log success
-
-   else:
-     • No update needed
-     • Silently continue
-
-5. On error (network, timeout):
-   • Log warning
-   • Keep using current pricing_data
-   • Increment sync_failures counter
-   • Fall back to bundled pricing.json if empty
+2. The backend cache and sync state paths are located under the server-side
+  repository (see `server-side_sdk/manager.py` for exact paths and defaults).
 ```
 
 ## Provider Integration Pattern
@@ -230,17 +221,16 @@ class ProviderInterceptor(CostInterceptor):
    Sync: Daily with hash-based change detection
    Fallback: Saved cache from last successful sync
 
-2. Secondary (Local Cache)
-   Path: src/pricing/pricing_cache.json
-   Format: Same as upstream
-   Created: After successful sync
-   Used: If sync fails
+3. Secondary (Server Local Cache)
+  Path: server-side_sdk/pricing_cache.json
+  Format: Same as upstream
+  Created: After successful sync
+  Used: If sync fails
 
-3. Tertiary (Bundled)
-   Path: src/pricing/pricing.json
-   Format: Extracted fields only (cost_per_1m_tokens, cache rates)
-   Updated: Manual maintenance
-   Used: Initial load, network offline
+4. Tertiary (Bundled / Initial)
+  Path: server-side_sdk/pricing_cache.json (created on first sync)
+  Format: Extracted fields only (cost_per_1m_tokens, cache rates)
+  Used: Initial load, network offline
 
 4. Tracking
    Path: src/pricing/pricing_sync.json
