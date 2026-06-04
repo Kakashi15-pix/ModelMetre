@@ -10,6 +10,8 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
+from auth.Config import ConfigError, get_api_key
+
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_AUTH_PATH = "/v1/auth/verify"
@@ -42,7 +44,10 @@ class CostAnalyticsClient:
 	) -> None:
 		"""Initialize the client without forcing network validation."""
 
-		self.api_key = api_key or os.getenv("CA_API_KEY")
+		try:
+			self.api_key = api_key or get_api_key()
+		except ConfigError as exc:
+			raise AuthenticationError(str(exc)) from exc
 		self.base_url = (base_url or os.getenv("CA_API_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
 		self.timeout = timeout
 		self.session = session or requests.Session()

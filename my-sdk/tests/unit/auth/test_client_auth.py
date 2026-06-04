@@ -51,12 +51,11 @@ class _SessionDouble:
         return None
 
 
-def test_ensure_authenticated_requires_api_key(monkeypatch):
+def test_constructor_requires_api_key(monkeypatch):
     monkeypatch.delenv("CA_API_KEY", raising=False)
-    client = CostAnalyticsClient(api_key=None, session=_SessionDouble(_DummyResponse(200)))
 
     with pytest.raises(AuthenticationError, match="CA_API_KEY is required"):
-        client._ensure_authenticated()
+        CostAnalyticsClient(api_key=None, session=_SessionDouble(_DummyResponse(200)))
 
 
 def test_ensure_authenticated_rejects_non_live_key():
