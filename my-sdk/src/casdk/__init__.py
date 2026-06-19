@@ -1,6 +1,6 @@
 #LLM Cost Observability SDK.
 
-from .client import CostAnalyticsClient
+from .client import CostAnalyticsClient,AuthenticationError
 from .sdk import CostAnalyticsSDK, get_sdk
 from .pricing import (
     CostExtractor,
@@ -19,6 +19,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Authenticated analytics client
     "CostAnalyticsClient",
+    "AuthenticationError",
     # Main SDK
     "CostAnalyticsSDK",
     "get_sdk",

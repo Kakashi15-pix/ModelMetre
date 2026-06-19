@@ -4,9 +4,11 @@ Client-side extraction only captures usage/model/stop_reason.
 Cost computation is handled exclusively by the backend orchestrator.
 """
 from abc import ABC, abstractmethod
+from secrets import choice
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import logging
+from urllib import response
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +107,12 @@ class Extractor(UsageExtractor):
         return response.get("model")
 
     def extract_stop_reason(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract stop reason from  response."""
-        return response.get("stop_reason")
-
-
-
+     choices = response.get("choices", [])
+     # OpenAI shape
+     if choices and isinstance(choices, list):
+        return choices[0].get("finish_reason")
+    # Anthropic shape
+     return response.get("stop_reason")
 
 def get_extractor(provider: str) -> Optional[UsageExtractor]:
     """Return the generic extractor for any named provider."""

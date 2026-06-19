@@ -3,7 +3,7 @@ Request details buffer and backend flush mechanism.
 Accumulates request data extraction only, flushes to backend on threshold or timer.
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, List, Any, Optional, Callable
 import logging
 import threading
@@ -61,7 +61,7 @@ class RequestDetailsBuffer:
         self.buffer: List[RequestDetails] = []
         self.on_flush = on_flush
         self._lock = threading.RLock()
-        self._last_flush_time = datetime.utcnow()
+        self._last_flush_time = datetime.now(UTC)
         self._flush_timer: Optional[threading.Timer] = None
         self._batch_flush_limiter = TokenBucket(capacity=1, refill_rate=1 / FLUSH_INTERVAL_SECONDS)
         self._start_timer()
@@ -116,7 +116,7 @@ class RequestDetailsBuffer:
             metadata: Additional metadata (optional)
         """
         details = RequestDetails(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             request_id=request_id,
             model=model,
             provider=provider,
@@ -155,7 +155,7 @@ class RequestDetailsBuffer:
 
             batch = self.buffer.copy()
             self.buffer.clear()
-            self._last_flush_time = datetime.utcnow()
+            self._last_flush_time = datetime.now(UTC)
 
             # Call backend callback outside lock to avoid blocking
             if self.on_flush:
@@ -201,9 +201,11 @@ class RequestDetailsBuffer:
 
     logger.info("Buffer shutdown complete")
     def __del__(self) -> None:
-        """Cleanup on garbage collection."""
-        if self._flush_timer:
-            self._flush_timer.cancel()
+       """Cleanup on garbage collection."""
+       timer = getattr(self, "_flush_timer", None)
+
+       if timer:
+           timer.cancel() 
 
 
 # Global buffer instance

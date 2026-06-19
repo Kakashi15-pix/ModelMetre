@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from casdk.pricing import RequestDetailsBuffer, RequestDetails
+from casdk import RequestDetailsBuffer, RequestDetails
 
 
 class TestRequestDetailsBuffer:
