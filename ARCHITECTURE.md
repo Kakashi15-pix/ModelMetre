@@ -13,9 +13,8 @@
 │  │                                                                 │ │
 │  │  Wrapper intercepts:                                           │ │
 │  │    1. Extract usage from response (SIGNAL)                    │ │
-│  │    2. Look up pricing (PULL)                                  │ │
-│  │    3. Compute cost                                            │ │
 │  │    4. Aggregate                                               │ │
+│  │                                                                |  | 
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
         ↓ (API request - no credentials exposed)
@@ -71,7 +70,7 @@ src/
 └── pricing/                    # Cost analytics engine (SDK-side)
   ├── __init__.py            # Pricing module exports
   ├── extractors.py          # Provider-specific extractors
-  ├── aggregator.py          # Cost aggregation + metrics
+  ├── aggregator.py          # Metrics
   ├── interceptor.py         # Client library wrappers
 
 Note: The authoritative PricingManager that performs upstream sync,
@@ -232,7 +231,7 @@ class ProviderInterceptor(CostInterceptor):
   Used: Initial load, network offline
 
 4. Tracking
-   Path: src/pricing/pricing_sync.json
+   Path: server-side_sdk/pricing_sync.json
    Format: {
      "last_sync": "2024-01-15T10:30:00",
      "last_hash": "sha256...",
