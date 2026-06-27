@@ -24,7 +24,7 @@ dependencies = [
     "httpx>=0.24.0",
 ]
 [project.urls]
-Repository = "https://github.com/Kakashi15-pix/llmcost-sdk"
+Repository = "https://github.com/Kakashi15-pix/ModelMetre"
 
 [project.optional-dependencies]
 dev = [
