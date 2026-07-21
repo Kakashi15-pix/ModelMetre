@@ -30,13 +30,13 @@ Client-side SDK for provider response interception, usage extraction, request bu
 
 ## Package Layout (Relevant)
 
-- `my-sdk/src/sdk.py`: `CostAnalyticsSDK` facade.
-- `my-sdk/src/pricing/interceptor.py`: wrapping and extraction pipeline.
-- `my-sdk/src/pricing/extractors.py`: provider extractors.
-- `my-sdk/src/pricing/aggregator.py`: request buffer + flush triggers.
-- `my-sdk/src/api/telemetry.py`: telemetry sender with failed flush retention/retry behavior.
-- `my-sdk/src/client.py`: authenticated API client (`CostAnalyticsClient`) with lazy key verification.
-- `my-sdk/src/auth/Config.py`: env-based API key loading (`CA_API_KEY`).
+- `my-sdk/src/sdk/sdk.py`: `CostAnalyticsSDK` facade.
+- `my-sdk/src/sdk/pricing/interceptor.py`: wrapping and extraction pipeline.
+- `my-sdk/src/sdk/pricing/extractors.py`: provider extractors.
+- `my-sdk/src/sdk/pricing/aggregator.py`: request buffer + flush triggers.
+- `my-sdk/src/sdk/api/telemetry.py`: telemetry sender with failed flush retention/retry behavior.
+- `my-sdk/src/sdk/client.py`: authenticated API client (`CostAnalyticsClient`) with lazy key verification.
+- `my-sdk/src/sdk/auth/config.py`: env-based API key loading (`CA_API_KEY`).
 
 ## Install
 
@@ -87,7 +87,7 @@ client = sdk.wrap_client(
 ### 3) Manual Flush
 
 ```python
-from pricing import get_request_buffer
+from sdk import get_request_buffer
 
 buffer = get_request_buffer()
 buffer.flush()
@@ -95,7 +95,7 @@ buffer.flush()
 
 ## Core APIs
 
-### `CostAnalyticsSDK` (`my-sdk/src/sdk.py`)
+### `CostAnalyticsSDK` (`my-sdk/src/sdk/sdk.py`)
 
 - `CostAnalyticsSDK(server_url: Optional[str] = None)`
 - `wrap_client(client, provider, method_path, response_to_dict=None, metadata=None)`
@@ -113,7 +113,7 @@ buffer.flush()
 }
 ```
 
-### Buffer (`my-sdk/src/pricing/aggregator.py`)
+### Buffer (`my-sdk/src/sdk/pricing/aggregator.py`)
 
 - `FLUSH_BATCH_SIZE = 50`
 - `FLUSH_INTERVAL_SECONDS = 30`
@@ -122,7 +122,7 @@ buffer.flush()
 - `RequestDetailsBuffer.flush()`
 - `RequestDetailsBuffer.get_pending_requests()`
 
-### Telemetry (`my-sdk/src/api/telemetry.py`)
+### Telemetry (`my-sdk/src/sdk/api/telemetry.py`)
 
 `TelemetryClient` behavior:
 
@@ -137,7 +137,7 @@ buffer.flush()
 
 ## Auth for SDK-to-Server API Calls
 
-`CostAnalyticsClient` (`my-sdk/src/client.py`) supports direct authenticated calls to server APIs.
+`CostAnalyticsClient` (`my-sdk/src/sdk/client.py`) supports direct authenticated calls to server APIs.
 
 - Reads `CA_API_KEY` when `api_key` not passed.
 - Performs lazy auth verification against `GET /v1/auth/verify` (default path).
@@ -152,7 +152,7 @@ buffer.flush()
 Example:
 
 ```python
-from client import CostAnalyticsClient
+from sdk import CostAnalyticsClient
 
 client = CostAnalyticsClient(
     api_key="ca_live_...",
