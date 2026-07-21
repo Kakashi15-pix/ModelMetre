@@ -107,12 +107,12 @@ class Extractor(UsageExtractor):
         return response.get("model")
 
     def extract_stop_reason(self, response: Dict[str, Any]) -> Optional[str]:
-     choices = response.get("choices", [])
-     # OpenAI shape
-     if choices and isinstance(choices, list):
-        return choices[0].get("finish_reason")
-    # Anthropic shape
-     return response.get("stop_reason")
+        choices = response.get("choices", [])
+        # OpenAI shape
+        if choices and isinstance(choices, list):
+            return choices[0].get("finish_reason")
+        # Anthropic shape
+        return response.get("stop_reason")
 
 def get_extractor(provider: str) -> Optional[UsageExtractor]:
     """Return the generic extractor for any named provider."""

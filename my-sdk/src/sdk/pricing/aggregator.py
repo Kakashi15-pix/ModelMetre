@@ -191,15 +191,13 @@ class RequestDetailsBuffer:
                 self._flush_timer = None
             logger.info("Buffer cleared and timer stopped")
     def shutdown(self) -> None:
-    #Flush remaining requests and stop timer.
-         with self._lock:
-               self.flush()
-
-               if self._flush_timer:
+        """Flush remaining requests and stop timer."""
+        with self._lock:
+            self.flush()
+            if self._flush_timer:
                 self._flush_timer.cancel()
                 self._flush_timer = None
-
-    logger.info("Buffer shutdown complete")
+        logger.info("Buffer shutdown complete")
     def __del__(self) -> None:
        """Cleanup on garbage collection."""
        timer = getattr(self, "_flush_timer", None)

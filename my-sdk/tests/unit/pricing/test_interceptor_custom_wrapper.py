@@ -1,8 +1,8 @@
 """Tests for generic custom client wrapper support."""
 
-from casdk.pricing.aggregator import get_cost_aggregator
-from casdk.pricing.interceptor import CostInterceptor, wrap_custom_client
-from casdk.sdk import CostAnalyticsSDK
+from sdk.pricing.aggregator import get_cost_aggregator
+from sdk.pricing.interceptor import CostInterceptor, wrap_custom_client
+from sdk.sdk import CostAnalyticsSDK
 
 
 class _ResponseObject:

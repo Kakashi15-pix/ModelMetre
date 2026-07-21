@@ -1,6 +1,6 @@
 """Integration tests for request-detail tracking."""
 
-from casdk.pricing import CostInterceptor, get_cost_aggregator
+from sdk.pricing import CostInterceptor, get_cost_aggregator
 
 
 class TestCostInterceptor:
@@ -31,7 +31,13 @@ class TestCostInterceptor:
             metadata={"tenant": "test"},
         )
 
-        assert result is None
+        assert result is not None
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+        assert result.cache_creation_tokens == 25
+        assert result.cache_read_tokens == 10
+        assert result.model == "custom-model-v1"
+        assert result.provider == "custom-provider"
         assert self.aggregator.get_buffer_size() == 1
 
         pending = self.aggregator.get_pending_requests()[0]

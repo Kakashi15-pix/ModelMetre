@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from casdk import RequestDetailsBuffer, RequestDetails
+from sdk import RequestDetailsBuffer, RequestDetails
 
 
 class TestRequestDetailsBuffer:

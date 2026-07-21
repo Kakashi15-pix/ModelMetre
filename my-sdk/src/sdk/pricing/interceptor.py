@@ -6,7 +6,7 @@ from typing import Any, Optional, Dict, Callable, Tuple
 import logging
 import uuid
 
-from .extractors import get_extractor
+from .extractors import get_extractor, UsageBreakdown
 from .aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class CostInterceptor:
         provider: str,
         request_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[UsageBreakdown]:
         """
         Process API response to extract and record request details.
         Extraction happens locally, but cost computation is handled by backend.
@@ -58,6 +58,9 @@ class CostInterceptor:
             provider: Provider name ('anthropic', 'openai', etc.)
             request_id: Optional request tracking ID
             metadata: Optional metadata to attach to request
+
+        Returns:
+            UsageBreakdown object with extracted details, or None
         """
         if not response:
             return None
@@ -95,6 +98,17 @@ class CostInterceptor:
         logger.debug(
             f"Buffered usage for {request_id} "
             f"({provider}/{model}): {usage}"
+        )
+
+        return UsageBreakdown(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            model=model,
+            provider=provider,
+            stop_reason=stop_reason,
+            raw_usage=response.get("usage"),
         )
 
 

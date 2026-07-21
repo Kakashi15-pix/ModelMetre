@@ -27,11 +27,11 @@ class CostAnalyticsSDK:
         metrics = sdk.get_metrics()
     """
 
-    def __init__(self):
-     self.interceptor = CostInterceptor()
-     self.aggregator = get_cost_aggregator()
-     self.telemetry_client = TelemetryClient(server_url=DEFAULT_BASE_URL)
-     self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
+    def __init__(self, server_url: Optional[str] = None):
+        self.interceptor = CostInterceptor()
+        self.aggregator = get_cost_aggregator()
+        self.telemetry_client = TelemetryClient(server_url=server_url or DEFAULT_BASE_URL)
+        self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
 
     def wrap_client(
         self,
@@ -112,14 +112,12 @@ class CostAnalyticsSDK:
         #Manually flush the request buffer to backend.
         self.aggregator.flush()
         logger.info("Buffer flushed manually")
-    def shutdown(self) -> None:
-     self.flush()
-     with self._lock:
-        if self._flush_timer:
-            self._flush_timer.cancel()
-            self._flush_timer = None
 
-    logger.info("Buffer shutdown complete")
+    def shutdown(self) -> None:
+        """Shutdown the SDK, flushing pending requests and closing connections."""
+        self.aggregator.shutdown()
+        self.telemetry_client.close()
+        logger.info("SDK shutdown complete")
 
 # Global SDK instance
 _sdk_instance = None

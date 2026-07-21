@@ -6,8 +6,8 @@ from datetime import datetime
 
 import requests
 
-from casdk.api.telemetry import TelemetryClient
-from casdk.pricing.aggregator import RequestDetails
+from sdk.api.telemetry import TelemetryClient
+from sdk.pricing.aggregator import RequestDetails
 
 
 class _FakeResponse:

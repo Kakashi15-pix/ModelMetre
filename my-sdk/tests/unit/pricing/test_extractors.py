@@ -1,6 +1,6 @@
 """Tests for generic usage extraction."""
 
-from casdk.pricing.extractors import Extractor, get_extractor
+from sdk.pricing.extractors import Extractor, get_extractor
 
 
 class TestExtractor:
