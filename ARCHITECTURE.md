@@ -1,490 +1,325 @@
-# Architecture & Design Documentation
+# Architecture & Design Documentation (Client-Side SDK)
 
 ## System Overview
 
+The `cost_analytics-SDK` is a lightweight, non-blocking client-side library designed to observe, intercept, and extract usage metadata from LLM API responses without exposing credentials or introducing performance bottlenecks. 
+
+Unlike backend billing systems, the SDK **does not compute costs locally** or manage upstream pricing databases. Instead, it captures token and model details in-memory, buffers them, and flushes request telemetry asynchronously to the server-side backend ([server-side_sdk](file:///d:/Projects/MYSDK/server-side_sdk/manager.py)) where authoritative pricing resolution and final cost computation occur.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    User Application                                  │
+│                          User Application                           │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │ LLM Client (Anthropic/OpenAI) - WRAPPED                       │ │
-│  │                                                                 │ │
-│  │  Original: client.messages.create(...)                        │ │
-│  │  Returns: response (unmodified)                               │ │
-│  │                                                                 │ │
-│  │  Wrapper intercepts:                                           │ │
-│  │    1. Extract usage from response (SIGNAL)                    │ │
-│  │    4. Aggregate                                               │ │
-│  │                                                                |  | 
+│  │ LLM Client (Anthropic/OpenAI/Custom) - WRAPPED                 │ │
+│  │                                                                │ │
+│  │  Original call: client.messages.create(...) or similar         │ │
+│  │  Returns: unmodified provider response object                  │ │
+│  │                                                                │ │
+│  │  Wrapper intercepts response:                                  │ │
+│  │    1. Converts response to dict (best effort / user-supplied)  │ │
+│  │    2. Extracts usage/model metadata via generic Extractor      │ │
+│  │    3. Buffers details in RequestDetailsBuffer                  │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
-        ↓ (API request - no credentials exposed)
-    ┌───────────────────────────────────────────────────────────────┐
-    │              LLM Provider (Anthropic/OpenAI)                  │
-    │              (Credentials on client machine)                 │
-    └───────────────────────────────────────────────────────────────┘
-        ↓ (API response with usage)
-    ┌───────────────────────────────────────────────────────────────┐
-    │           CostExtractor (Provider-Specific)                   │
-    │  • Extracts usage fields from response                        │
-    │  • Maps to standard format                                    │
-    │  • Handles provider-specific cache fields                     │
-    └───────────────────────────────────────────────────────────────┘
-        ↓
-    ┌───────────────────────────────────────────────────────────────┐
-    │         Server-side PricingManager (server-side_sdk)          │
-    │  • Located in server-side_sdk/manager.py                      │
-    │  • Local cache + upstream sync managed on backend             │
-    │  • Silent fallback on network error; server exposes pricing API
-    └───────────────────────────────────────────────────────────────┘
-        ↓
-    ┌───────────────────────────────────────────────────────────────┐
-    │          CostExtractor.compute_cost()                         │
-    │  • Input cost = (tokens * rate) / 1M                          │
-    │  • Output cost = (tokens * rate) / 1M                         │
-    │  • Cache costs (provider-specific)                            │
-    └───────────────────────────────────────────────────────────────┘
-        ↓
-    ┌───────────────────────────────────────────────────────────────┐
-    │               CostAggregator                                   │
-    │  • Record request with cost/tokens/metadata                   │
-    │  • Compute aggregations (total, by model, by provider)        │
-    │  • Support time windows                                       │
-    │  • Export to JSON                                             │
-    └───────────────────────────────────────────────────────────────┘
-        ↓
-    ┌───────────────────────────────────────────────────────────────┐
-    │           User Gets Metrics (local only)                      │
-    │  • get_aggregated_metrics()                                   │
-    │  • get_metrics_in_window()                                    │
-    │  • export_costs()                                             │
-    └───────────────────────────────────────────────────────────────┘
+        │
+        ▼ (Intercepts response metadata & usage)
+┌─────────────────────────────────────────────────────────────────────┐
+│               RequestDetailsBuffer (In-Memory Buffer)               │
+│  • Accumulates RequestDetails (no cost computation on client)       │
+│  • Triggers flush when size >= FLUSH_BATCH_SIZE (50)                │
+│  • Triggers flush when timer >= FLUSH_INTERVAL_SECONDS (30s)        │
+└─────────────────────────────────────────────────────────────────────┘
+        │
+        ▼ (Batch of RequestDetails)
+┌─────────────────────────────────────────────────────────────────────┐
+│              TelemetryClient (SDK API Client Component)             │
+│  • Sends payload: POST {server_url}/v1/telemetry/flush              │
+│  • Fails gracefully: keeps up to 5 failed batches in-memory         │
+│  • Retries immediately once if connection is lost or not received   │
+└─────────────────────────────────────────────────────────────────────┘
+        │
+        ▼ (Network POST to server-side_sdk backend)
+┌─────────────────────────────────────────────────────────────────────┐
+│            Backend Server (server-side_sdk / manager.py)            │
+│  • Authenticates telemetry flush (Bearer api_key)                  │
+│  • Performs authoritative pricing lookup                            │
+│  • Computes final costs & saves to DB                               │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Module Hierarchy
 
+The codebase is organized as follows:
+
 ```
-src/
-├── __init__.py                 # Main SDK exports
-├── sdk.py                      # CostAnalyticsSDK unified client
+my-sdk/src/sdk/
+├── __init__.py                 # Main SDK exports and package metadata
+├── client.py                   # CostAnalyticsClient (lazy authentication & custom pricing submission)
+├── sdk.py                      # CostAnalyticsSDK (unified SDK entry point / facade)
+├── constants.py                # Constant declarations (currently empty)
+├── errors.py                   # Custom SDK exceptions (currently empty)
 │
-└── pricing/                    # Cost analytics engine (SDK-side)
-  ├── __init__.py            # Pricing module exports
-  ├── extractors.py          # Provider-specific extractors
-  ├── aggregator.py          # Metrics
-  ├── interceptor.py         # Client library wrappers
+├── api/                        # Telemetry communication layer
+│   ├── __init__.py
+│   ├── routes.py               # Backend endpoint constants (verify, telemetry, custom pricing)
+│   └── telemetry.py            # TelemetryClient for flushing request batches to server
+│
+├── auth/                       # SDK key authentication configuration
+│   ├── __init__.py
+│   └── config.py               # Environment variable key lookup helper (CA_API_KEY)
+│
+├── middleware/                 # Middleware and safety helpers
+│   ├── __init__.py
+│   └── rate_limit.py           # TokenBucket rate-limiter for telemetry flush budget
+│
+└── pricing/                    # Extractor and Buffering Engine (SDK-side)
+    ├── __init__.py
+    ├── aggregator.py          # RequestDetails and RequestDetailsBuffer (backward-compatible aliases)
+    ├── extractors.py          # Generic Extractor and UsageBreakdown model
+    └── interceptor.py         # CostInterceptor and wrap_custom_client
+```
 
-Note: The authoritative PricingManager that performs upstream sync,
-cache management and pricing lookups lives in the backend at
-`server-side_sdk/manager.py`. The SDK is responsible for extraction,
-interception and buffering of request details; final pricing resolution
-is performed on the server unless the SDK is explicitly configured
-to perform local lookups.
+### Test Directory Layout
 
-examples/
-├── cost_tracking.py            # Basic usage examples
-└── production_observer.py       # Production patterns
-
-tests/
-├── unit/
+```
+my-sdk/tests/
+├── conftest.py                # Pytest configuration
+├── unit/                       # Unit tests
+│   ├── test_client.py          # Client lifecycle, lazy auth, and pricing submission tests
+│   ├── test_cache.py           # Verification cache tests
+│   ├── test_errors.py          # Exception validation
 │   └── pricing/
-│       ├── test_extractors.py  # ExtractorTests
-│       └── test_aggregator.py  # AggregatorTests
-│
-└── integration/
-    └── test_cost_tracking.py   # End-to-end tests
+│       ├── test_extractors.py  # Usage extraction parsing correctness
+│       ├── test_aggregator.py  # Buffer accumulation, flush timing, rate limits, and retry tests
+│       └── test_interceptor_custom_wrapper.py # Client wrapping and converter tests
+├── integration/                # Integration test suites
+└── e2e/                        # End-to-end validations
 ```
+
+---
 
 ## Data Flow Examples
 
-### Example 1: Anthropic Request
+### Example 1: Wrapped LLM Request Flow
+
+1. **User wraps a provider client**:
+   ```python
+   client = sdk.wrap_client(
+       client=client,
+       provider="anthropic",
+       method_path="messages.create"
+   )
+   ```
+2. **User calls client method**:
+   ```python
+   response = client.messages.create(
+       model="claude-3-opus-20240229",
+       messages=[{"role": "user", "content": "Hello"}]
+   )
+   ```
+3. **Method interceptor catches response**:
+   The wrapped method in [interceptor.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/interceptor.py) captures the response and converts it into a dictionary using a default converter (e.g. `response.model_dump()`) or a user-provided `response_to_dict` callback.
+
+4. **Usage extraction**:
+   The [Extractor](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/extractors.py) extracts usage metrics and model attributes into a standard [UsageBreakdown](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/extractors.py) object:
+   ```python
+   UsageBreakdown(
+       input_tokens=100,
+       output_tokens=50,
+       cache_creation_tokens=0,
+       cache_read_tokens=0,
+       model="claude-3-opus-20240229",
+       provider="anthropic",
+       stop_reason="end_turn",
+       raw_usage={...}
+   )
+   ```
+
+5. **In-Memory buffering**:
+   The [CostInterceptor](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/interceptor.py) records these fields in the [RequestDetailsBuffer](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/aggregator.py) as a [RequestDetails](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/aggregator.py) instance:
+   ```python
+   RequestDetails(
+       timestamp=datetime.now(UTC),
+       request_id="uuid-...",
+       model="claude-3-opus-20240229",
+       provider="anthropic",
+       input_tokens=100,
+       output_tokens=50,
+       cache_read_tokens=0,
+       cache_creation_tokens=0,
+       stop_reason="end_turn",
+       metadata={"method": "messages.create"}
+   )
+   ```
+
+6. **Batch Telemetry Flush**:
+   When the buffer hits the batch threshold (`FLUSH_BATCH_SIZE = 50`) or the timer expires (`FLUSH_INTERVAL_SECONDS = 30`), the background thread flushes the batch of request records:
+   - The buffer calls `on_flush(batch)`.
+   - `on_flush` forwards the batch to `TelemetryClient.flush_batch(batch)` in [telemetry.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/api/telemetry.py).
+   - The `TelemetryClient` posts the data to `POST {server_url}/v1/telemetry/flush`.
+
+7. **Backend computation**:
+   The server-side backend receives the telemetry payload, validates credentials, resolves pricing rates for the model, and computes the final cost before recording it to the analytical database.
+
+---
+
+### Example 2: Custom Pricing Submission Flow
+
+A user can submit custom pricing metadata to override default backend provider prices for their account:
 
 ```
-1. User calls:
-   response = client.messages.create(model="claude-3-opus-...", messages=[...])
-
-2. Wrapper intercepts response:
-   {
-     "id": "msg_123",
-     "model": "claude-3-opus-20240229",
-     "usage": {
-       "input_tokens": 100,
-       "output_tokens": 50,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 0
-     }
-   }
-
-3. Extractor.extract_usage():
-   {
-     "input_tokens": 100,
-     "output_tokens": 50,
-     "cache_creation_tokens": 0,
-     "cache_read_tokens": 0
-   }
-
-4. SDK buffers request details for backend telemetry:
-   RequestDetails(
-     timestamp=datetime.utcnow(),
-     request_id="...",
-     model="claude-3-opus-20240229",
-     provider="anthropic",
-     input_tokens=100,
-     output_tokens=50,
-     cache_read_tokens=0,
-     cache_creation_tokens=0
+1. Developer calls:
+   client.submit_custom_pricing(
+       model="custom-model-v1",
+       provider="my-provider",
+       input_cost_per_1m_tokens=10.0,
+       output_cost_per_1m_tokens=20.0,
+       cache_creation_cost_per_1m_tokens=12.5,
+       cache_read_cost_per_1m_tokens=1.0
    )
 
-5. Backend PricingManager.get_pricing("claude-3-opus-20240229"):
-   {
-     "input_cost_per_1m_tokens": 15.0,
-     "output_cost_per_1m_tokens": 75.0,
-     "cache_creation_cost_per_1m_tokens": 18.75,
-     "cache_read_cost_per_1m_tokens": 1.5
-   }
+2. CostAnalyticsClient (client.py) prepares payload:
+   POST /v1/pricing/custom
+   Headers:
+     Authorization: Bearer ca_live_...
+     X-CA-Key-Id: key-id-...
+     X-CA-User-Id: user-id-...
 
-6. Backend computes cost:
-   input_cost = (100 * 15.0) / 1_000_000 = 0.0015
-   output_cost = (50 * 75.0) / 1_000_000 = 0.00375
-   total_cost = 0.00525
+3. Server-side backend intercepts request, authenticates credentials, and updates 
+   account-specific custom pricing records.
 ```
 
-### Example 2: Pricing Sync
+---
 
-```
-Scheduled (daily):
+## Interception & Usage Extraction
 
-1. The backend `PricingManager` (server-side_sdk/manager.py) manages upstream sync
-  and local caching. Typical flow:
+### Dynamic Client Wrapper
 
-  • Check sync interval and decide whether to contact upstream
-  • GET upstream JSON from LiteLLM
-  • Compute hash of upstream data and compare with last known hash
-  • If changed: update pricing cache and sync state files on server
-  • On error: increment sync failures and continue serving cached data
+The SDK wraps existing client libraries dynamically using the [wrap_custom_client](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/interceptor.py) function. It splits dotted method paths (e.g. `chat.completions.create` or `messages.create`) to resolve internal API objects and wraps the original method call.
 
-2. The backend cache and sync state paths are located under the server-side
-  repository (see `server-side_sdk/manager.py` for exact paths and defaults).
-```
+The wrapper:
+- Invokes the original API method synchronously.
+- Converts the response to a dictionary using a standard conversion sequence (`model_dump` -> `dict` -> `__dict__` -> fallback string).
+- Merges user-supplied static metadata and method path identifiers.
+- Invokes [CostInterceptor.process_response](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/interceptor.py) in-line, ensuring that any failures in the extraction logic are caught gracefully and do not disrupt the client application.
 
-## Provider Integration Pattern
+### Generic Extractor
 
-Each provider follows same pattern:
+Rather than utilizing individual extractor classes for each provider, the SDK provides a single, unified [Extractor](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/extractors.py) class implementing the [UsageExtractor](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/extractors.py) base interface.
+
+It parses standard provider formats by checking for:
+- Input tokens: `input_tokens` (Anthropic) or `prompt_tokens` (OpenAI).
+- Output tokens: `output_tokens` (Anthropic) or `completion_tokens` (OpenAI).
+- Cached read tokens: `cache_read_tokens`, `cache_read_input_tokens`, or `cached_prompt_tokens`.
+- Cache creation tokens: `cache_creation_tokens` or `cache_creation_input_tokens`.
+- Stop reasons: checks `choices[0].finish_reason` (OpenAI) or `stop_reason` (Anthropic).
+
+---
+
+## Request Details & Buffering Model
+
+### RequestDetails Data Structure
+
+Records in the buffer are represented by the [RequestDetails](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/aggregator.py) dataclass. It contains exclusively metadata required for backend cost identification:
 
 ```python
-class ProviderExtractor(CostExtractor):
-    """Extract costs from Provider API."""
-    
-    def extract_usage(response):
-        """
-        Map response fields to standard format:
-        {
-            "input_tokens": int,
-            "output_tokens": int,
-            "cache_read_tokens": int,
-            "cache_creation_tokens": int
-        }
-        """
-        # Provider-specific field mapping
-        pass
-    
-    def extract_model(response):
-        """Get model identifier for pricing lookup."""
-        pass
-    
-    def compute_cost(usage, pricing):
-        """Compute cost using provider-specific formula."""
-        # Some providers have different cache models
-        pass
-
-# Register in EXTRACTORS dict
-EXTRACTORS = {
-    "provider_name": ProviderExtractor,
-}
-
-# Optional: Create convenience wrapper
-class ProviderInterceptor(CostInterceptor):
-    def wrap_client(self, client):
-        # Specific client wrapping logic
-        pass
+@dataclass
+class RequestDetails:
+    timestamp: datetime
+    request_id: str
+    model: str
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    stop_reason: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 ```
 
-## Pricing Data Model
+### RequestDetailsBuffer & Flush Mechanism
 
-### Source Hierarchy
+The [RequestDetailsBuffer](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/aggregator.py) class acts as a thread-safe cache buffer:
+- **Thread Safety**: Employs a reentrant lock (`threading.RLock`) to synchronize batch additions and buffer clearings.
+- **Timer Trigger**: Launches a background daemon thread (`threading.Timer`) configured to run every `FLUSH_INTERVAL_SECONDS = 30` to flush the buffer even if the size limit is not reached.
+- **Batch Trigger**: Immediately checks the buffer size on request entry. If `size >= FLUSH_BATCH_SIZE = 50`, it flushes immediately.
+- **Rate-Limiting (Token Bucket)**: Batch-based flushes are rate-limited via a [TokenBucket](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/middleware/rate_limit.py) (capacity = 1, refill rate = 1 token per 30 seconds) to prevent redundant concurrent telemetry uploads. If rate limit is hit, the flush is deferred to the next timer tick.
 
-```
-1. Primary (Upstream LiteLLM)
-   URL: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
-   Format: Full upstream JSON with all fields
-   Sync: Daily with hash-based change detection
-   Fallback: Saved cache from last successful sync
+For backward compatibility, a helper function `get_cost_aggregator()` is provided as an alias for `get_request_buffer()`.
 
-3. Secondary (Server Local Cache)
-  Path: server-side_sdk/pricing_cache.json
-  Format: Same as upstream
-  Created: After successful sync
-  Used: If sync fails
+---
 
-4. Tertiary (Bundled / Initial)
-  Path: server-side_sdk/pricing_cache.json (created on first sync)
-  Format: Extracted fields only (cost_per_1m_tokens, cache rates)
-  Used: Initial load, network offline
+## Telemetry & API Client
 
-4. Tracking
-   Path: server-side_sdk/pricing_sync.json
-   Format: {
-     "last_sync": "2024-01-15T10:30:00",
-     "last_hash": "sha256...",
-     "sync_failures": 0
-   }
-```
+### Telemetry Client (`TelemetryClient`)
 
-### Pricing JSON Format
+Defined in [telemetry.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/api/telemetry.py), the [TelemetryClient](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/api/telemetry.py) transmits batches to the backend:
+- **Batch Retention**: If a telemetry request fails, the client saves the failed batch in-memory. Up to `MAX_FAILED_BATCHES = 5` batches are retained (oldest are dropped if exceeded) to prevent memory leaks during extended backend outages.
+- **Immediate Retry**: If an exception indicates that the request was connection-based or "not received" (e.g. `requests.ConnectionError`), the client attempts an immediate retry once before retaining the batch.
+- **Batch Re-delivery**: On subsequent successful flushes, previously retained failed batches are automatically re-submitted.
 
-```json
-{
-  "model-name": {
-    "input_cost_per_1m_tokens": float,
-    "output_cost_per_1m_tokens": float,
-    "cache_creation_cost_per_1m_tokens": float (optional),
-    "cache_read_cost_per_1m_tokens": float (optional)
-  }
-}
-```
+### Lazy API-Key client (`CostAnalyticsClient`)
 
-**Notes**:
-- Cache rates optional: computed from input_rate if not provided
-- Default cache_creation_rate = input_rate * 1.25
-- Default cache_read_rate = input_rate * 0.1
-- All rates are per 1M tokens
+The [CostAnalyticsClient](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/client.py) handles authenticated client-server telemetry and utility requests:
+- **Lazy Authentication**: API key loading and validation against `GET /v1/auth/verify` are deferred until the first HTTP request is executed, reducing startup overhead.
+- **Key Validation**: Ensures keys are format-compliant (prefixed with `ca_live_`).
+- **Header Enrichment**: Automatically injects identity and routing headers into requests:
+  - `Authorization: Bearer <api_key>`
+  - `X-CA-Key-Id`: Hashed API key identifier returned by server auth.
+  - `X-CA-User-Id`: Resolved user account ID returned by server auth.
+  - `X-Request-Id`: Client-generated UUID for tracing.
+  - `X-CA-Provider` / `X-CA-Model`: Target model descriptors.
 
-## Cost Computation Formulas
-
-### Standard Formula (Both Providers)
-
-```
-total_cost = (
-    (input_tokens * input_rate) +
-    (output_tokens * output_rate) +
-    (cache_creation_tokens * cache_creation_rate) +
-    (cache_read_tokens * cache_read_rate)
-) / 1_000_000
-```
-
-### Anthropic Specifics
-
-```
-# Cache tokens reduce input cost by ~90%
-cache_read_cost_per_1m = input_cost_per_1m * 0.1
-
-# Creating cache adds 25% premium to input
-cache_creation_cost_per_1m = input_cost_per_1m * 1.25
-
-# Example:
-input_tokens: 100 (10 cached)
-cache_read_tokens: 10
-cache_creation_tokens: 5
-
-input_cost = (100 - 10) * 15.0 / 1M = 0.0013
-cache_read_cost = 10 * 1.5 / 1M = 0.000015
-cache_creation_cost = 5 * 18.75 / 1M = 0.0000938
-total = 0.0013088
-```
-
-### OpenAI Specifics
-
-```
-# Cache tokens reuse input rate
-cache_read_cost_per_1m = input_cost_per_1m * discount_factor (varies by model)
-
-# OpenAI doesn't separately charge for cache creation
-cache_creation_tokens = 0
-
-# Example (gpt-4-turbo):
-prompt_tokens: 100
-completion_tokens: 50
-cached_prompt_tokens: 20
-
-input_cost = 100 * 10.0 / 1M = 0.001
-completion_cost = 50 * 30.0 / 1M = 0.0015
-cache_cost = 20 * 5.0 / 1M = 0.0001
-total = 0.0026
-```
-
-## Aggregation Model
-
-```python
-AggregatedMetrics:
-  - total_cost: sum(request.total_cost)
-  - total_requests: len(requests)
-  - total_input_tokens: sum(request.input_tokens)
-  - total_output_tokens: sum(request.output_tokens)
-  - total_cache_read_tokens: sum(request.cache_read_tokens)
-  - total_cache_creation_tokens: sum(request.cache_creation_tokens)
-  - by_model: {model → total_cost}
-  - by_provider: {provider → total_cost}
-  - cost_breakdown: {type → cost}
-```
-
-## Extension Points
-
-### Add New Provider
-
-1. Create `ProviderExtractor` class
-2. Register in `EXTRACTORS`
-3. (Optional) Create `ProviderInterceptor` class
-4. Add pricing to `pricing.json`
-
-### Add New Aggregation
-
-1. Extend `CostAggregator` with new method
-2. Follow pattern of `get_aggregated_metrics()`
-3. Example: `get_metrics_by_user()`, `get_metrics_by_endpoint()`
-
-### Add New Alert
-
-1. Create alert class/function
-2. Call from `CostInterceptor.process_response()`
-3. Example: cost threshold, anomaly detection, rate limiting
-
-### Add New Export Format
-
-1. Add method to `CostAggregator`
-2. Transform `self.requests` to desired format
-3. Example: CSV, Parquet, Cloud Storage
+---
 
 ## Error Handling Strategy
 
-```
-Layer 1 - Extraction
-├─ Try extract_usage()
-├─ If fails: log warning, return None (cost not recorded)
-└─ If succeeds: continue
+1. **Extraction Safeguards**:
+   If the usage extraction fail or field parsing errors occur in [extractors.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/pricing/extractors.py), the error is logged as a warning, and the request details are skipped. The user application's main thread is never interrupted by extraction failures.
 
-Layer 2 - Pricing Lookup
-├─ Try get_pricing()
-├─ If not found: log warning, return None (cost not recorded)
-└─ If found: continue
+2. **Telemetry Failures**:
+   Timer-based and batch flushes execute in separate threads. If HTTP transmission fails, the thread logs the warning and retains the batch. Exceptions are not raised to the main application thread.
 
-Layer 3 - Computation
-├─ Try compute_cost()
-├─ If fails: log error, return None
-└─ If succeeds: record to aggregator
+3. **Lazy Key Authentication**:
+   - Authentication validation failures (401/403) from `GET /v1/auth/verify` fail fast, raising an `AuthenticationError` to prevent unnecessary retries.
+   - Server-side transient issues (5xx status codes) are retried up to `max_retries = 3` using exponential backoff before propagating the failure.
 
-Layer 4 - Aggregation
-├─ Try record_request()
-├─ If fails: log error (cost discarded)
-└─ If succeeds: silent success
+4. **Shutdown Operations**:
+   Calling `shutdown()` on [CostAnalyticsSDK](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/src/sdk/sdk.py) manually triggers a final flush of remaining requests, cancels pending background timers, and closes HTTP sessions cleanly.
 
-Layer 5 - Pricing Sync
-├─ Try sync_from_upstream()
-├─ If fails: log warning, use cached/bundled (no exception)
-├─ If succeeds: update pricing_data
-└─ Always falls back gracefully
-```
-
-**Philosophy**: 
-- Never break user's code
-- Log all failures for debugging
-- Always have fallback
-- Silent failures for sync (important in production)
+---
 
 ## Performance Considerations
 
-### Memory
+- **In-Memory Buffering**: Because request metadata is kept in-memory and buffered in batches of 50 or on 30-second cycles, database and remote network latency are excluded from the main execution path.
+- **Batch Retention Bounds**: Bounding retained failed telemetry batches at 5 keeps memory footprints minimal even if connection to the telemetry server is lost for hours.
+- **Non-Blocking Background Threads**: Buffering and flushing actions run on daemon threads, separating network latency from user client calls.
+- **Thread Safety**: Every manipulation of the in-memory queue is protected by reentrant lock semantics, preventing race conditions in highly concurrent environments (e.g. multi-threaded web servers).
 
-- `CostAggregator.requests` is unbounded list
-  - Solution: Implement sliding window (keep last N requests)
-  - Or: Periodically archive and clear
-  - Or: Use circular buffer
-
-- `PricingManager.pricing_data` (~100-500KB)
-  - Full LiteLLM upstream JSON
-  - Loaded once at startup
-  - Cached to disk
-
-### CPU
-
-- `compute_cost()`: O(1) arithmetic
-- `extract_usage()`: O(1) dict access
-- `get_aggregated_metrics()`: O(N) where N = request count
-  - Linearity acceptable for small N (<100K)
-  - Could optimize with running totals
-
-### I/O
-
-- Pricing sync: Async in background (future)
-- Export: Streaming write to file
-- No DB overhead: All in-memory
-
-### Recommended Limits
-
-- Keep <100K requests in memory at once
-- Sync pricing once per day
-- Export costs daily
-- Archive old requests weekly
+---
 
 ## Security Considerations
 
-### Data Protection
+- **Credential Separation**: The SDK does not read, store, or transmit provider-specific credentials (OpenAI keys, Anthropic keys). It only observes response structures returned by the provider SDK.
+- **API Key Formatting**: Evaluates local client credentials to ensure proper `ca_live_` formatting before initiating authentication requests.
+- **No Content Telemetry**: Only request tokens, provider names, model names, stop reasons, and developer-provided metadata are recorded. The SDK **never** transmits request prompt text, response completions, or other potential PII.
 
-✓ **Credentials never exposed**: Only API responses processed  
-✓ **No central server**: All local storage  
-✓ **No PII by default**: Only cost metrics  
-✓ **Export control**: User explicitly exports  
-
-### Future Considerations
-
-- Encryption for cost exports
-- Audit logging for access
-- Role-based access control (in multi-user scenarios)
-- Cost data retention policies
+---
 
 ## Testing Strategy
 
-```
-Unit Tests:
-├─ Extractors
-│  ├─ Valid response extraction
-│  ├─ Missing fields handling
-│  └─ Cost computation accuracy
-├─ Aggregator
-│  ├─ Record + aggregate
-│  ├─ Time windows
-│  └─ Export formats
-└─ Manager
-   ├─ Pricing lookup
-   └─ Sync behavior
+All features are covered by targeted unit and integration suites in the `tests/` directory:
 
-Integration Tests:
-├─ End-to-end tracking
-├─ Multi-provider scenarios
-└─ Error recovery
+1. **Usage Extraction Tests** ([test_extractors.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/tests/unit/pricing/test_extractors.py)):
+   Verifies model extraction, stop reason parsing, and prompt/completion extraction from standard OpenAI-style (`prompt_tokens`/`completion_tokens`/`cached_prompt_tokens`) and Anthropic-style (`input_tokens`/`output_tokens`/`cache_creation_input_tokens`/`cache_read_input_tokens`) response payloads.
 
-Manual Tests:
-├─ Real API calls
-├─ Pricing accuracy vs. dashboard
-└─ Production patterns
-```
+2. **Details Buffer Tests** ([test_aggregator.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/tests/unit/pricing/test_aggregator.py)):
+   Verifies request recording, size-based batch threshold triggers, flush rate-limiting, manual flushing, flush failures re-adding items back to the buffer, metadata enrichment, clear operations, and daemon shutdown cleanup.
 
-## Future Enhancements
+3. **Interceptor Wrapper Tests** ([test_interceptor_custom_wrapper.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/tests/unit/pricing/test_interceptor_custom_wrapper.py)):
+   Verifies dotted method path resolution on nested clients (e.g. `client.responses.create`), custom response conversion callbacks, and static metadata merging.
 
-### Phase 2: Cloud Infrastructure
-
-- AWS CUR + Athena
-- GCP BigQuery
-- Azure Cost Management
-
-### Phase 3: Advanced Features
-
-- ML-based cost anomaly detection
-- Budget alerts and forecasting
-- Cost optimization recommendations
-- Integration with popular frameworks (LangChain, etc.)
-
-### Phase 4: Enterprise
-
-- Multi-tenant support
-- Fine-grained access control
-- Cost attribution (by user, team, project)
-- Historical trending and analysis
+4. **Client Auth and Lifecycle Tests** ([test_client.py](file:///d:/Projects/MYSDK/cost_analytics-SDK/my-sdk/tests/unit/test_client.py)):
+   Tests environment variable integration (`CA_API_KEY`), lazy authentication, connection retry behaviors under 5xx server states, custom pricing API requests (`submit_custom_pricing`), and session cleanup.
