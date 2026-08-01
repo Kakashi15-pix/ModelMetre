@@ -49,7 +49,7 @@ class CostAnalyticsClient:
 			self.api_key = api_key or get_api_key()
 		except ConfigError as exc:
 			raise AuthenticationError(str(exc)) from exc
-		self.base_url = (base_url or os.getenv("CA_API_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+		self.base_url = os.getenv("CA_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
 		self.timeout = timeout
 		self.session = session or requests.Session()
 		self.auth_path = auth_path
