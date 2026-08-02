@@ -27,11 +27,15 @@ class CostAnalyticsSDK:
         metrics = sdk.get_metrics()
     """
 
-    def __init__(self):
-        self.interceptor = CostInterceptor()
-        self.aggregator = get_cost_aggregator()
-        self.telemetry_client = TelemetryClient(DEFAULT_BASE_URL)
-        self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
+    def __init__(self, api_key: str, client_id: str, base_url: str = DEFAULT_BASE_URL):
+     self.interceptor = CostInterceptor()
+     self.aggregator = get_cost_aggregator()
+     self.telemetry_client = TelemetryClient(
+        base_url,
+        api_key=api_key,
+        client_id=client_id,
+    )
+     self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
 
     def wrap_client(
         self,
