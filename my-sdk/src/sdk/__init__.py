@@ -7,8 +7,6 @@ from .pricing import (
     get_extractor,
     RequestDetailsBuffer,
     RequestDetails,
-    get_request_buffer,
-    get_cost_aggregator,
     CostInterceptor,
     wrap_custom_client,
     FLUSH_BATCH_SIZE,
@@ -29,8 +27,6 @@ __all__ = [
     # Buffer (replaces aggregator)
     "RequestDetailsBuffer",
     "RequestDetails",
-    "get_request_buffer",
-    "get_cost_aggregator",
     "FLUSH_BATCH_SIZE",
     "FLUSH_INTERVAL_SECONDS",
     # Interceptor

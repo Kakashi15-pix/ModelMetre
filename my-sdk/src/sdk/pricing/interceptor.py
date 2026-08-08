@@ -7,7 +7,7 @@ import logging
 import uuid
 
 from .extractors import get_extractor, UsageBreakdown
-from .aggregator import get_cost_aggregator
+from .aggregator import RequestDetailsBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ def _resolve_owner_and_attr(root: Any, attr_path: str) -> Tuple[Any, str]:
 
 class CostInterceptor:
 
-    def __init__(self):
-        self.aggregator = get_cost_aggregator()
+    def __init__(self,aggregator:RequestDetailsBuffer):
+        self.aggregator = aggregator
 
     def process_response(
         self,

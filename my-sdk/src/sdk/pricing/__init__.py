@@ -9,8 +9,6 @@ from .extractors import (
 from .aggregator import (
     RequestDetailsBuffer,
     RequestDetails,
-    get_request_buffer,
-    get_cost_aggregator,
     FLUSH_BATCH_SIZE,
     FLUSH_INTERVAL_SECONDS,
 )
@@ -31,8 +29,6 @@ __all__ = [
     # Buffer (replaces aggregator)
     "RequestDetailsBuffer",
     "RequestDetails",
-    "get_request_buffer",
-    "get_cost_aggregator",
     "FLUSH_BATCH_SIZE",
     "FLUSH_INTERVAL_SECONDS",
     # Interceptor

@@ -204,23 +204,3 @@ class RequestDetailsBuffer:
 
        if timer:
            timer.cancel() 
-
-
-# Global buffer instance
-_buffer = None
-
-
-def get_request_buffer(on_flush: Optional[Callable[[List[RequestDetails]], None]] = None) -> RequestDetailsBuffer:
-    """Get or create global request details buffer."""
-    global _buffer
-    if _buffer is None:
-        _buffer = RequestDetailsBuffer(on_flush=on_flush)
-    elif on_flush is not None:
-        _buffer.set_on_flush(on_flush)
-    return _buffer
-
-
-# Backward compatibility alias
-def get_cost_aggregator() -> RequestDetailsBuffer:
-    """Get or create global cost aggregator (alias for backward compatibility)."""
-    return get_request_buffer()
