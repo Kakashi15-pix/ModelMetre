@@ -1,6 +1,6 @@
 """Tests for generic custom client wrapper support."""
 
-from sdk.pricing.aggregator import get_cost_aggregator
+from sdk.pricing.aggregator import RequestDetailsBuffer
 from sdk.pricing.interceptor import CostInterceptor, wrap_custom_client
 from sdk.sdk import CostAnalyticsSDK
 
@@ -40,12 +40,12 @@ class _DummyDirectClient:
 
 class TestCustomClientWrapper:
     def setup_method(self):
-        self.aggregator = get_cost_aggregator()
-        self.aggregator.clear()
+        self.aggregator = RequestDetailsBuffer()
+        
 
     def test_wrap_custom_nested_method_path(self):
         client = _DummyClient()
-        interceptor = CostInterceptor()
+        interceptor = CostInterceptor(aggregator=self.aggregator)
 
         wrap_custom_client(
             client=client,
@@ -68,7 +68,7 @@ class TestCustomClientWrapper:
 
     def test_wrap_custom_with_response_converter(self):
         client = _DummyDirectClient()
-        interceptor = CostInterceptor()
+        interceptor = CostInterceptor(aggregator=self.aggregator)
 
         wrap_custom_client(
             client=client,
@@ -93,8 +93,8 @@ class TestCustomClientWrapper:
 
     def test_sdk_wrap_custom_reuses_sdk_interceptor(self):
         client = _DummyClient()
-        sdk = CostAnalyticsSDK()
-        self.aggregator.clear()
+        sdk = CostAnalyticsSDK(api_key="test-key", client_id="test-client")
+        
 
         sdk.wrap_client(
             client=client,
@@ -105,8 +105,8 @@ class TestCustomClientWrapper:
 
         client.responses.create("track")
 
-        assert self.aggregator.get_buffer_size() == 1
-        pending = self.aggregator.get_pending_requests()[0]
+        assert sdk.aggregator.get_buffer_size() == 1
+        pending = sdk.aggregator.get_pending_requests()[0]
         assert pending.provider == "sdk-custom"
         assert pending.metadata["integration"] == "sdk"
         assert pending.metadata["method"] == "responses.create"

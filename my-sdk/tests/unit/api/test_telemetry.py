@@ -55,7 +55,11 @@ def _request(request_id: str) -> RequestDetails:
 
 
 def test_flush_batch_retries_not_received_once():
-    client = TelemetryClient(server_url="https://telemetry.example.com")
+    client = TelemetryClient(
+        server_url="https://telemetry.example.com",
+        api_key="test-key",
+        client_id="test-client",
+        )                                          
     client.session = _FakeSession([
         requests.ConnectionError("not received"),
         _FakeResponse(200),
@@ -68,7 +72,11 @@ def test_flush_batch_retries_not_received_once():
 
 
 def test_flush_batch_retains_last_five_failed_batches():
-    client = TelemetryClient(server_url="https://telemetry.example.com")
+    client = TelemetryClient(
+        server_url="https://telemetry.example.com",
+        api_key="test-key",
+        client_id="test-client",
+        )
     client.session = _FakeSession([
         requests.ConnectionError("not received")
         for _ in range(12)

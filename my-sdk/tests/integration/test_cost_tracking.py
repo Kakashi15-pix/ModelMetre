@@ -1,17 +1,19 @@
 """Integration tests for request-detail tracking."""
 
-from sdk.pricing import CostInterceptor, get_cost_aggregator
+from sdk.pricing import CostInterceptor
+from sdk.pricing import aggregator
+from sdk.pricing.aggregator import RequestDetailsBuffer
 
 
 class TestCostInterceptor:
     """Test SDK-side request detail buffering."""
 
     def setup_method(self):
-        self.aggregator = get_cost_aggregator()
-        self.aggregator.clear()
+        self.aggregator = RequestDetailsBuffer()
+       
 
     def test_process_response_buffers_common_usage_shape(self):
-        interceptor = CostInterceptor()
+        interceptor = CostInterceptor(aggregator=self.aggregator)
         response = {
             "id": "msg_123",
             "model": "custom-model-v1",
@@ -52,7 +54,7 @@ class TestCostInterceptor:
         assert pending.metadata["tenant"] == "test"
 
     def test_process_response_buffers_prompt_completion_usage_shape(self):
-        interceptor = CostInterceptor()
+        interceptor = CostInterceptor(aggregator=self.aggregator)
         response = {
             "id": "resp_123",
             "model": "another-model-v1",
@@ -77,7 +79,7 @@ class TestCostInterceptor:
         assert pending.cache_read_tokens == 20
 
     def test_multiple_requests_are_buffered_for_backend_flush(self):
-        interceptor = CostInterceptor()
+        interceptor = CostInterceptor(aggregator=self.aggregator)
 
         for index in range(3):
             interceptor.process_response(
