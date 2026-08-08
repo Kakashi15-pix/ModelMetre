@@ -3,7 +3,7 @@
 from typing import Any, Optional, Dict, Callable
 import logging
 
-from sdk.pricing.aggregator import RequestDetailsBuffer
+from .pricing.aggregator import RequestDetailsBuffer
 from .client import DEFAULT_BASE_URL, DEFAULT_AUTH_PATH, AuthContext, AuthenticationError
 from .pricing import (
     CostInterceptor,
